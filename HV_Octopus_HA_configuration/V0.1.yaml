@@ -9,7 +9,12 @@ template:
           {% set min_day_rate = state_attr('sensor.octopus_energy_electricity_please_input_your_details_current_rate', 'current_day_min_rate') | float | round(2) %}
           {% set ev_rate_low = 0.xx | float %}
           {% set ev_rate_high = 0.xx | float %}
-          {% if min_day_rate > ev_rate_low %}
+          {% set max_charge_rate = min_day_rate + 0.xx %}  {# Allow up to 5p above the minimum rate #}
+
+          {% if min_day_rate <= 0 %}
+            {# Allow charging up to 5p above zero or less minimum rate #}
+            {{ max_charge_rate | round(2) }}
+          {% elif min_day_rate > ev_rate_low %}
             {{ min_day_rate | round(2) + 0.xx }}
           {% elif min_day_rate > ev_rate_high %}
             {{ ev_rate_high | round(2) }}
