@@ -1,0 +1,171 @@
+template:
+  # Hypervolt Sensors
+  - sensor:
+      - name: "EV Charger Automation Rate"
+        unique_id: EV_Charger_Automation_rate
+        unit_of_measurement: "GBP/kWh"
+        icon: "mdi:currency-gbp"
+        state: >
+          {% set min_day_rate = state_attr('sensor.octopus_energy_electricity_please_input_your_details_current_rate', 'current_day_min_rate') | float | round(2) %}
+          {% set ev_rate_low = 0.xx | float %}
+          {% set ev_rate_high = 0.xx | float %}
+          {% if min_day_rate > ev_rate_low %}
+            {{ min_day_rate | round(2) + 0.xx }}
+          {% elif min_day_rate > ev_rate_high %}
+            {{ ev_rate_high | round(2) }}
+          {% else %}
+            {{ min_day_rate | round(2) + 0.xx }}
+          {% endif %}
+
+  - sensor:
+      - name: "Octopus Min Daily rate"
+        unique_id: Octopus_Min_Daily_rate
+        unit_of_measurement: "GBP/kWh"
+        icon: "mdi:currency-gbp"
+        state: "{{ state_attr('sensor.octopus_energy_electricity_please_input_your_details_current_rate', 'current_day_min_rate') | round(2) }}"
+
+  - sensor:
+      - name: "Hypervolt Charging Mode"
+        unique_id: Charger_Automation_Mode
+        icon: "mdi:ev-station"
+        state: >
+          {% if (states('sensor.octopus_energy_electricity_please_input_your_details_current_rate') | float < 0) %} 
+            Active
+          {% elif states('sensor.octopus_power_up_status') == 'Active' %} 
+            Active
+          {% elif (states('sensor.octopus_energy_electricity_please_input_your_details_current_rate') | float < states('sensor.ev_charger_automation_rate') | float) %}
+            Active
+          {% else %}
+            Not Active 
+          {% endif %}
+
+  # gmail sensor
+  - trigger:
+      - platform: event
+        event_type: "imap_content"
+        id: "xxxx_mail_eventid"
+        # event_data:
+        # sender: hello@octopus.energy.com
+        # sender: xxxxx@gmail.com
+    sensor:
+      - name: octopus_energy_electricity_email_sensor
+        state: "{{ trigger.event.data['subject'] }}"
+        attributes:
+          Message: "{{ trigger.event.data['text'] }}"
+          Server: "{{ trigger.event.data['server'] }}"
+          Username: "{{ trigger.event.data['username'] }}"
+          Search: "{{ trigger.event.data['search'] }}"
+          Folder: "{{ trigger.event.data['folder'] }}"
+          Sender: "{{ trigger.event.data['sender'] }}"
+          Date: "{{ trigger.event.data['date'] }}"
+          Subject: "{{ trigger.event.data['subject'] }}"
+          To: "{{ trigger.event.data['headers'].get('Delivered-To', ['n/a'])[0] }}"
+          Return-Path: "{{ trigger.event.data['headers'].get('Return-Path',['n/a'])[0] }}"
+          Received-first: "{{ trigger.event.data['headers'].get('Received',['n/a'])[0] }}"
+          Received-last: "{{ trigger.event.data['headers'].get('Received',['n/a'])[-1] }}"
+
+  # gmail powerup sensor
+  - sensor:
+      - platform: template
+        sensors:
+          octopus_power_up_start_time:
+            friendly_name: "Octopus - Power-Up Start Time"
+            value_template: >
+              {% set sensor_value = states('sensor.octopus_energy_electricity_email_sensor') %}
+
+              {% set time_range = sensor_value | regex_findall('\\d+-\\d+ ?[APap][Mm]') %}
+              {% set time_str_list = sensor_value | regex_findall('\\d+:\\d+ [AP]M') %}
+              {% set date_str_list = sensor_value | regex_findall('\\d+/\\d+/\\d+') %}
+              {% set tomorrow_match = sensor_value | regex_search('tomorrow', ignorecase=True) %}
+
+              {% if time_str_list and date_str_list %}
+                {# Standard case with explicit date and time #}
+                {% set time_str = time_str_list[0] %}
+                {% set date_str = date_str_list[0] %}
+                {% set datetime_str = date_str + ' ' + time_str %}
+                {% if date_str.split('/')[-1] | length == 2 %}
+                  {{ strptime(datetime_str, '%d/%m/%y %I:%M %p') }}
+                {% else %}
+                  {{ strptime(datetime_str, '%d/%m/%Y %I:%M %p') }}
+                {% endif %}
+
+              {% elif tomorrow_match and time_range %}
+                {# Case with "tomorrow" and a time range, e.g., "1-2pm" #}
+                {% set start_time = time_range[0].split('-')[0] %}
+                {% set end_time = time_range[0].split('-')[1] %}
+                
+                {# Determine if AM/PM is present in the time range #}
+                {% set am_pm = 'PM' if 'PM' in time_range[0] or 'pm' in time_range[0] else 'AM' %}
+                
+                {# Assign AM/PM to the start time accordingly #}
+                {% set start_time = start_time | regex_replace('([APap][Mm])', '') ~ ' ' ~ am_pm %}
+                
+                {% set tomorrow = (now() + timedelta(days=1)).strftime('%d/%m/%Y') %}
+                {% set datetime_str = tomorrow + ' ' + start_time %}
+                
+                {{ strptime(datetime_str, '%d/%m/%Y %I %p') }}
+
+              {% else %}
+                none
+              {% endif %}
+
+          octopus_power_up_end_time:
+            friendly_name: "Octopus - Power-Up End Time"
+            value_template: >
+              {% set sensor_value = states('sensor.octopus_energy_electricity_email_sensor') %}
+
+              {% set time_range = sensor_value | regex_findall('\\d+-\\d+ ?[APap][Mm]') %}
+              {% set time_str_list = sensor_value | regex_findall('\\d+:\\d+ [AP]M') %}
+              {% set date_str_list = sensor_value | regex_findall('\\d+/\\d+/\\d+') %}
+              {% set tomorrow_match = sensor_value | regex_search('tomorrow', ignorecase=True) %}
+
+              {% if time_str_list and date_str_list %}
+                {# Standard case with explicit date and time #}
+                {% set time_str = time_str_list[1] if time_str_list | length > 1 else '0' %}
+                {% set date_str = date_str_list[0] %}
+                {% set datetime_str = date_str + ' ' + time_str %}
+                {% if date_str.split('/')[-1] | length == 2 %}
+                  {{ strptime(datetime_str, '%d/%m/%y %I:%M %p') }}
+                {% else %}
+                  {{ strptime(datetime_str, '%d/%m/%Y %I:%M %p') }}
+                {% endif %}
+
+              {% elif tomorrow_match and time_range %}
+                {# Case with "tomorrow" and a time range, e.g., "1-2pm" #}
+                {% set start_time = time_range[0].split('-')[0] %}
+                {% set end_time = time_range[0].split('-')[1] %}
+                
+                {# Determine if AM/PM is present in the time range #}
+                {% set am_pm = 'PM' if 'PM' in time_range[0] or 'pm' in time_range[0] else 'AM' %}
+                
+                {# Assign AM/PM to both start and end times #}
+                {% set end_time = end_time | regex_replace('([APap][Mm])', '') ~ ' ' ~ am_pm %}
+                
+                {% set tomorrow = (now() + timedelta(days=1)).strftime('%d/%m/%Y') %}
+                {% set datetime_str = tomorrow + ' ' + end_time %}
+                
+                {{ strptime(datetime_str, '%d/%m/%Y %I %p') }}
+
+              {% else %}
+                none
+              {% endif %}
+
+          now:
+            friendly_name: "Now"
+            value_template: "{{ now() }}"
+
+          octopus_power_up_status:
+            friendly_name: "Octopus Power-Up Status"
+            value_template: >
+              {% set now = states('sensor.now') %}
+              {% set start = states('sensor.octopus_power_up_start_time') %}
+              {% set end = states('sensor.octopus_power_up_end_time') %}
+              {% if start != 'none' and end != 'none' %}
+                {% if now >= start and now <= end %}
+                  Active
+                {% else %}
+                  Not Active
+                {% endif %}
+              {% else %}
+                Not Active
+              {% endif %}
